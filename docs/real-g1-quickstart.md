@@ -50,12 +50,14 @@ scripts/serve_wla.sh
 
 ## 4. 로봇 준비 — G1 Monitor
 
+최신 PAOS의 실물 HAL은 서비스 기동 시 Unitree 기본 motion service를 반납시킵니다. **서비스를 시작하기 전에 외부 지지를 준비**하고, G1의 OS 실행 가이드에 따라 최신 인계·Homepose 수정을 적용합니다. 이 수정은 현재 실물 재검증을 기다리고 있어, WLA 서버 기동 성공과 로봇 동작 검증은 구분합니다. 서비스 기동만으로 Homepose/WBC를 시작하지는 않습니다.
+
 PAOS가 실물 프로필 `profiles/g1_real_orin_groot.yaml` 또는 설치된 대응 프로필을 사용하고 있는지 확인합니다. 현재 G1은 DDS domain0/eth0, `hal.mode_machine: 5`, 양손 Dex1 설정을 사용합니다. `paos status`에서 state가 존재하고 HAL/WBC가 Green이어야 합니다.
 
 1. Monitor에서 Ready/Home pose 실행.
 2. 지지를 내려 양발을 바닥에 접지.
 3. 같은 Monitor에서 Start WBC.
-4. 지지 해제 후 자세 안정화 확인.
+4. 1초 명령 전환이 끝난 뒤 지지 해제·실제 자세 안정화 확인.
 5. Monitor의 Release control / 입력권 반납 완료 확인.
 
 설치·모델 서버 시작은 이 준비 절차를 대신하지 않습니다.
@@ -98,6 +100,12 @@ git pull --ff-only
 .venv-adapter/bin/python -m pip install -e .
 ```
 
-SDK 버전 변경 시에만 새 wheel도 설치합니다. 모델 서버 코드가 변경됐다면 서버도 재시작합니다. 모든 실험을 마치면 Adapter를 먼저 Stop하고, 터미널 A의 모델 서버를 Ctrl+C로 종료합니다. 이번 설치의 백그라운드 서버는 해당 PID가 이 모델 서버인지 확인한 후 `kill -TERM "$(cat runs/model-server.pid)"`로 종료합니다. 결과는 각 `runs/.../result.json`에 남습니다.
+SDK wheel 갱신 안내가 있으면 같은 버전이라도 새 파일로 교체·재설치합니다. Homepose 응답 대기는 최신 SDK에서10초이며 실제 준비 자세 이동5초와는 별개입니다.
+
+```sh
+.venv-adapter/bin/python -m pip install --force-reinstall --no-deps /tmp/paos_remote-0.2.0-py3-none-any.whl
+```
+
+ 모델 서버 코드가 변경됐다면 서버도 재시작합니다. 모든 실험을 마치면 Adapter를 먼저 Stop하고, 터미널 A의 모델 서버를 Ctrl+C로 종료합니다. 이번 설치의 백그라운드 서버는 해당 PID가 이 모델 서버인지 확인한 후 `kill -TERM "$(cat runs/model-server.pid)"`로 종료합니다. 결과는 각 `runs/.../result.json`에 남습니다.
 
 팔·그리퍼 적용은 `configs/g1-real-arm-gripper.yaml`을 별도 `private/` 설정으로 복사해 선택합니다. 프롬프트만 바꿔서는 팔 제어가 켜지지 않습니다. 이 경로는 base3·arm14·Dex1을 적용하며, measured q29 기반 PlaCo IK를 사용합니다. IK 미수렴 근사값도 전송하는 현재 실험 정책이 있어 base 입력 확인과 구분해 검증해야 합니다.
