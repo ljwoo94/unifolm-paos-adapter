@@ -16,3 +16,7 @@ unifolm-paos --config configs/adapter.example.yaml --seconds 10 --output runs/co
 공식 G1 URDF는 geometry 변경 없이 보관한다. 실제29관절 전체 FK, pelvis 기준 EE9, wrist-local+x0.105m, 명시적 Dex1 native-rad profile을 사용한다. 모델 서버의 normalization을 중복 적용하지 않는다. simulator oracle나 이전 원격 임의 실험의 pose/offset은 입력으로 사용하지 않는다.
 
 Vendor codec 출처/라이선스는 `_vendor/UNIFOLM_LICENSE`, URDF 및 모델 근거/검증 범위는 PAOS 작업의 docs/implementation/remote-model-interface.md와 .scratch/remote-model-interface/research에 있다.
+
+Kitchen 실험 설정 `configs/kitchen-rgb.yaml`/`kitchen-jpeg.yaml`은 base3에 더해 실험용 EE→arm14 IK와 Dex1 gripper projection을 켠다. 공통 Facade는 typed joint/torso/cancel 요청을 기존 PAOS API로 전달한다. IK는 measured q29를 seed로 쓰는 URDF 기반 DLS이며 공식 배포 IK·충돌 계획은 아니다. 수렴하지 않은 경우도 제한 안의 근사 관절값을 residual/수렴 flag와 함께 전송하는 현재 실험 정책에 주의한다. waist/lower15/height/pivot까지 재현한 whole-body 연결은 아직 아니다.
+
+실제 작업 추론은 Ready/Homepose→발 접지→WBC→줄 지지 해제와 자세 안정화가 완료된 후 시작한다. optional JPEG는 Orin NX에서 raw 대비 우위가 검증된 기본값이 아니다. Mac/WLA Wi-Fi 시험과 Orin NX/WLA1Gbps Ethernet 측정은 분리한다. `record_inputs`와 diagnostics는 관측/모델/명령별 측정과256bundle 이내 입력 보관을 위한 실험 옵션이다.

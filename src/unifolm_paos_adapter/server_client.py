@@ -28,12 +28,16 @@ class ModelClient:
 
     def infer(self,observation):
         if self.socket is None:raise RuntimeError('explicit model connection required')
-        self.socket.send(codec.packb({'type':'get_action','obs':observation}))
+        begun=self.clock()
+        packed=codec.packb({'type':'get_action','obs':observation});encoded=self.clock()
+        self.socket.send(packed)
         message=self.socket.recv(timeout=self.timeout)
         received=self.clock()
         if isinstance(message,str):raise RuntimeError('model server failed: '+message[:512])
-        return ModelActionChunk.from_response(codec.unpackb(message),received_at=received,
+        chunk=ModelActionChunk.from_response(codec.unpackb(message),received_at=received,
             period_s=self.period_s,expected_horizon=self.horizon)
+        self.last_timing=dict(pack_s=encoded-begun,model_roundtrip_s=received-encoded,decode_validate_s=self.clock()-received,request_bytes=len(packed))
+        return chunk
 
     def close(self):
         socket,self.socket=self.socket,None

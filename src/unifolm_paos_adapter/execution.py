@@ -2,6 +2,7 @@
 from collections import deque
 import threading
 import time
+from bisect import bisect_right
 
 from .chunk import base_goal_at
 
@@ -50,6 +51,13 @@ class ChunkExecution:
     def latest_chunk(self):
         with self._condition:
             return self._chunk
+
+    def current_sample(self):
+        with self._condition:
+            chunk=None if self._stopped else self._chunk
+        if chunk is None:return None
+        index=bisect_right(chunk.grid,max(0.,self._clock()-chunk.received_at))-1
+        return (chunk,index)if index<chunk.horizon else None
 
     def current_goal(self):
         with self._condition:
@@ -113,7 +121,7 @@ class ChunkExecution:
                         self._responses += 1
                         self._events.append(dict(kind='chunk', received_at=chunk.received_at,
                             observation_to_receipt_s=chunk.received_at - started,
-                            horizon=chunk.horizon, period_s=chunk.period_s))
+                            horizon=chunk.horizon, period_s=chunk.period_s,model=getattr(model,'last_timing',None)))
                 except Exception as error:
                     with self._condition:
                         if self._stopped:

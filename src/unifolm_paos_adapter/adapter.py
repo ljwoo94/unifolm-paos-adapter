@@ -34,14 +34,27 @@ def build_observation(observation,*,kinematics,instruction,gripper_mapping):
             if frame['metadata']['run_id']!=robot['run_id']or frame['metadata']['camera']!=name:
                 raise InputUnavailable('camera run/role mismatch')
             h,w=frame['height'],frame['width']
-            if type(h)is not int or type(w)is not int or not 0<h<=240 or not 0<w<=320 or frame['encoding']!='rgb8':
+            if type(h)is not int or type(w)is not int or not 0<h<=240 or not 0<w<=320 or frame['encoding']not in ('rgb8','jpeg'):
                 raise InputUnavailable('unsupported RGB dimensions/encoding')
-            raw=frame['rgb']
-            if not isinstance(raw,bytes)or len(raw)!=h*w*3:raise InputUnavailable('RGB byte length mismatch')
-            rgb=np.frombuffer(raw,np.uint8).reshape(h,w,3)
+            rgb=frame_rgb(frame)
             # Official server consumes BGR and performs its own BGR->RGB/resize.
             result[f'observation.images.{role}']=rgb[:,:,::-1].copy()
         return result
     except InputUnavailable:raise
     except (KeyError,TypeError,ValueError)as exc:
         raise InputUnavailable(f'incomplete or invalid model input: {exc}')from exc
+
+
+def frame_rgb(frame):
+    h,w=frame['height'],frame['width']
+    if frame['encoding']=='rgb8':
+        raw=frame['rgb']
+        if not isinstance(raw,bytes)or len(raw)!=h*w*3:raise InputUnavailable('RGB byte length mismatch')
+        return np.frombuffer(raw,np.uint8).reshape(h,w,3)
+    if frame['encoding']=='jpeg':
+        from io import BytesIO
+        from PIL import Image
+        with Image.open(BytesIO(frame['data']))as image:
+            if image.format!='JPEG'or image.size!=(w,h):raise InputUnavailable('JPEG format/dimensions mismatch')
+            return np.asarray(image.convert('RGB'))
+    raise InputUnavailable('unsupported image encoding')

@@ -11,8 +11,8 @@ from urllib.parse import urlparse
 
 import numpy as np
 import yaml
-from paos_remote import RemoteRobotClient
-from .adapter import build_observation
+from paos_remote import RemoteRobotClient, RemoteError
+from .adapter import build_observation, frame_rgb
 from .execution import ChunkExecution
 from .kinematics import G1Kinematics
 from .server_client import ModelClient
@@ -21,7 +21,7 @@ from .server_client import ModelClient
 def load_config(path):
     value = yaml.safe_load(Path(path).read_text())
     required = {'robot_target', 'model_server_url', 'instruction', 'period_s', 'gripper_mapping'}
-    if not isinstance(value, dict) or not required <= value.keys() or set(value) - required - {'horizon', 'model_timeout_s', 'rpc_timeout_s'}:
+    if not isinstance(value, dict) or not required <= value.keys() or set(value) - required - {'horizon', 'model_timeout_s', 'rpc_timeout_s', 'observation_timeout_s', 'command_hz', 'projection', 'diagnostics', 'record_inputs', 'image_encoding', 'jpeg_quality'}:
         raise ValueError('invalid Adapter configuration fields')
     target = urlparse('//' + str(value['robot_target']))
     model = urlparse(str(value['model_server_url']))
@@ -36,10 +36,24 @@ def load_config(path):
     value.setdefault('horizon', 30)
     value.setdefault('model_timeout_s', 30.)
     value.setdefault('rpc_timeout_s', 2.)
-    for field in ('period_s', 'model_timeout_s', 'rpc_timeout_s'):
+    value.setdefault('observation_timeout_s',value['rpc_timeout_s'])
+    value.setdefault('command_hz',30.)
+    value.setdefault('diagnostics',False)
+    value.setdefault('record_inputs',False)
+    value.setdefault('image_encoding','rgb8');value.setdefault('jpeg_quality',80)
+    if value['image_encoding']not in ('rgb8','jpeg')or type(value['jpeg_quality'])is not int or not 1<=value['jpeg_quality']<=95:raise ValueError('unsupported image encoding/quality')
+    for field in ('period_s', 'model_timeout_s', 'rpc_timeout_s', 'observation_timeout_s', 'command_hz'):
         v = value[field]
         if type(v) not in (int, float) or not math.isfinite(v) or v <= 0:
             raise ValueError(f'positive finite {field} required')
+    if value['command_hz']>100 or any(type(value[k])is not bool for k in ['diagnostics','record_inputs']):raise ValueError('bounded rate and boolean diagnostics required')
+    if 'projection'in value:
+        projection=value['projection']
+        if projection.get('kind')!='arm_ee_gripper' or not .1<=projection.get('duration_s',0)<=30:
+            raise ValueError('explicit arm/gripper projection and supported reference duration required')
+        for side in ['left','right']:
+            bounds=projection['gripper_endpoints'][side]
+            if len(bounds)!=2 or not np.isfinite(bounds).all() or not bounds[0]<bounds[1]:raise ValueError('native-rad gripper endpoints required')
     if type(value['horizon']) is not int or not 0 < value['horizon'] <= 512:
         raise ValueError('bounded integer horizon required')
     if not isinstance(value['instruction'], str) or not value['instruction'].strip():
@@ -63,15 +77,39 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
     resume = resume or threading.Event()
     kinematics = G1Kinematics()
     timeout = config['rpc_timeout_s']
-    observer = RemoteRobotClient.connect(config['robot_target'], timeout=timeout)
+    observer = RemoteRobotClient.connect(config['robot_target'], timeout=config.get('observation_timeout_s',timeout))
     owner = None
+    latest_body=[None];observation_trace=deque(maxlen=256);observation_count=[0]
+    projection=None
+    if config.get('projection'):
+        from .projection import ArmGripperProjection
+        projection=ArmGripperProjection(config['projection']['gripper_endpoints'])
+    if config.get('record_inputs'):(output/'inputs').mkdir()
     def observe():
-        snapshot = observer.observe()
-        return build_observation(snapshot, kinematics=kinematics, instruction=config['instruction'],
+        started=time.monotonic()
+        options={}
+        if config.get('diagnostics'):options['diagnostics']=True
+        if 'image_encoding'in config:options.update(image_encoding=config['image_encoding'],jpeg_quality=config.get('jpeg_quality',80))
+        snapshot=observer.observe(**options)
+        received=time.monotonic()
+        result=build_observation(snapshot, kinematics=kinematics, instruction=config['instruction'],
                                  gripper_mapping=config['gripper_mapping'])
+        if not (config.get('diagnostics')or projection or config.get('record_inputs')):return result
+        latest_body[0]=dict(q=np.asarray(snapshot['robot']['state']['q'],dtype=float),state_seq=snapshot['robot']['state']['state_seq'],received_at=received)
+        observation_count[0]+=1
+        row=dict(index=observation_count[0],requested_at=started,received_at=received,
+            roundtrip_s=received-started,state_seq=snapshot['robot']['state']['state_seq'],
+            frames={name:{key:frame['metadata'][key]for key in ['sequence','source_sequence','source_epoch','rgb_time_ns','received_ns','published_ns']}for name,frame in snapshot['frames'].items()},
+            server=snapshot.get('diagnostics'),client=snapshot.get('client_timing'))
+        if config.get('record_inputs') and row['index']<=256:
+            for name,frame in snapshot['frames'].items():
+                np.save(output/'inputs'/f"{row['index']:04d}-{name}.npy",frame_rgb(frame))
+        row['conversion_and_recording_s']=time.monotonic()-received
+        observation_trace.append(row)
+        return result
     player = ChunkExecution(model_factory=lambda: ModelClient.connect(config['model_server_url'],
         period_s=config['period_s'], horizon=config['horizon'], timeout=config['model_timeout_s']), observe=observe)
-    report = dict(scope='live PAOS observations -> WLA model; base3 only' if not probe else 'live observation/model probe; no input ownership or commands',
+    report = dict(scope=('live PAOS observations -> WLA model; base3 and experimental arm/gripper projection'if projection else 'live PAOS observations -> WLA model; base3 only') if not probe else 'live observation/model probe; no input ownership or commands',
         configuration=config, run_id=observer.run_id, goal_count=0, paused=False, close_error=None,
         goals=[], robot_status_before=observer.status())
     goals = deque(maxlen=256)
@@ -89,6 +127,7 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
         player.start()
         player_started = True
         started = time.monotonic()
+        report['started_at']=started
         next_tick = started
         previous_pause = False
         while not stop.is_set() and time.monotonic() - started < seconds:
@@ -106,21 +145,52 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
             if paused != previous_pause:
                 print(json.dumps(dict(paused=paused, error=player.error)), flush=True)
                 previous_pause = paused
-            goal = player.current_goal()
+            sample=player.current_sample()if projection else None
+            goal=(tuple(float(v)for v in sample[0].actions['action.base_command'][0,sample[1],:3])if sample else None)if projection else player.current_goal()
             if goal is not None and owner is not None:
                 begin = time.monotonic()
-                accepted = owner.set_velocity(*goal)
+                row=dict(at_s=begin-started,attempted_at=begin,velocity=goal,stages={})
+                goals.append(row)
+                body=latest_body[0]
+                projected=projection.targets(sample[0],sample[1],body['q'])if projection else None
+                def dispatch(name,call):
+                    stage=dict(outcome='attempted');row['stages'][name]=stage
+                    before=time.monotonic()
+                    try:
+                        value=call()
+                    except RemoteError as error:
+                        stage.update(outcome='unknown'if error.code in (3,9)else'rejected',code=error.code,error=str(error)[:512])
+                        raise
+                    except Exception as error:
+                        stage.update(outcome='unknown',error=f'{type(error).__name__}: {error}'[:512])
+                        raise
+                    else:
+                        stage.update(outcome='accepted',run_id=value.run_id,goal_ref=value.goal_ref)
+                        return value
+                    finally:
+                        stage['rpc_s']=time.monotonic()-before
+                accepted=dispatch('base',lambda:owner.set_velocity(*goal))
                 report['goal_count'] += 1
-                goals.append(dict(at_s=begin-started, run_id=accepted.run_id,
-                    goal_ref=accepted.goal_ref, velocity=goal, expires_ns=accepted.expires_ns,
-                    rpc_s=time.monotonic()-begin))
+                row.update(run_id=accepted.run_id,goal_ref=accepted.goal_ref,accepted_ns=accepted.accepted_ns,expires_ns=accepted.expires_ns)
+                if projected is not None:
+                    row.update(chunk_received_at=sample[0].received_at,sample_index=sample[1],projection=projected,
+                        ik_state_seq=body['state_seq'],ik_observation_age_s=begin-body['received_at'])
+                    arm=dispatch('arms',lambda:owner.set_joint_positions(projected['positions'],duration_s=config['projection']['duration_s']))
+                    row['arm_goal_ref']=arm.goal_ref
+                    row['gripper_goal_refs']={}
+                    for side,opening in projected['grippers'].items():
+                        grip=dispatch('gripper_'+side,lambda side=side,opening=opening:owner.set_gripper(side,opening))
+                        row['gripper_goal_refs'][side]=grip.goal_ref
+                row['rpc_s']=sum(v['rpc_s']for v in row['stages'].values())
+                row['tick_elapsed_s']=time.monotonic()-begin
             latest = player.latest_chunk()
             if probe and (latest is not None or player.paused):
                 break
-            next_tick += config['period_s']
+            send_period=1/config.get('command_hz',1/config['period_s'])
+            next_tick += send_period
             now = time.monotonic()
             if next_tick <= now:
-                next_tick += (math.floor((now-next_tick)/config['period_s'])+1)*config['period_s']
+                next_tick += (math.floor((now-next_tick)/send_period)+1)*send_period
             stop.wait(max(0., next_tick-time.monotonic()))
         report['elapsed_s'] = time.monotonic()-started
         report['robot_status_after'] = observer.status()
@@ -141,7 +211,11 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
                 player.stop()
                 player.join(timeout=config['model_timeout_s']+2)
                 report['model_worker_stopped'] = not player.alive
-                report.update(player.snapshot())
+                run_error=report.get('error')
+                snapshot=player.snapshot()
+                report.update(snapshot)
+                report['model_error']=snapshot.get('error')
+                if run_error is not None:report['error']=run_error
         except Exception as exc:
             cleanup_errors.append(f'model cleanup: {exc}')
         try:
@@ -158,6 +232,9 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
             cleanup_errors.append(f'observer cleanup: {exc}')
         report['cleanup_errors'] = cleanup_errors
         report['normal_stop'] = normal_stop
+        report['observations']=list(observation_trace)
+        report['observation_snapshot_complete']=not player.alive
+        report['attempt_count']=len(goals)
         (output/'result.json').write_text(json.dumps(report, indent=2, allow_nan=False)+'\n')
     return report
 

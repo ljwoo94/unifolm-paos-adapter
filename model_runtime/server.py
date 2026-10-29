@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import sys
+import time
 
 import numpy as np
 import cv2
@@ -44,10 +45,12 @@ class NativeServer(ActionServerWBCMsgpack):
 
     def get_action(self,obs):
         if 'rtc'in obs:raise ValueError('RTC is excluded')
+        started=time.perf_counter()
         prep=self._build_example(obs)
+        preprocessed=time.perf_counter()
         predicted,elapsed=self.runtime.predict(prep['example'],seed=obs.get('seed'))
         result=self._encode_action(predicted[0],prep['unnorm_key'],prep['state_unnorm'])
-        logging.info('native model seconds=%.6f',elapsed)
+        logging.info('MODEL_TIMING %s',json.dumps(dict(preprocess_s=preprocessed-started,predict_s=elapsed,encode_s=time.perf_counter()-preprocessed-elapsed)))
         return result
 
     async def _run(self,host,port):

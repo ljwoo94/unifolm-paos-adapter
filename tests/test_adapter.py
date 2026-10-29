@@ -76,3 +76,16 @@ def test_chunk_preserves_all_fields_and_time_boundaries():
     with pytest.raises(ValueError):ModelActionChunk.from_response(bad,received_at=0,period_s=1/30)
     bad=raw_chunk();del bad['action.pivot']
     with pytest.raises(ValueError):ModelActionChunk.from_response(bad,received_at=0,period_s=1/30)
+
+
+def test_explicit_jpeg_transport_is_decoded_before_official_bgr_input():
+    from io import BytesIO
+    from PIL import Image
+    data=snapshot();buffer=BytesIO()
+    Image.fromarray(np.full((1,2,3),[17,83,201],dtype=np.uint8)).save(buffer,format='JPEG',quality=95)
+    for f in data['frames'].values():
+        f.pop('rgb');f['data']=buffer.getvalue();f['encoding']='jpeg'
+    result=build_observation(data,kinematics=G1Kinematics(),instruction='pick carrot',
+        gripper_mapping={'kind':'dex1_native_rad','offsets':{'left':0.,'right':0.}})
+    assert result['observation.images.cam_left_high'].dtype==np.uint8
+    np.testing.assert_allclose(result['observation.images.cam_left_high'][0,0],[201,83,17],atol=3)
