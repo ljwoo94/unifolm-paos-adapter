@@ -13,16 +13,17 @@ import numpy as np
 import yaml
 from paos_remote import RemoteRobotClient, RemoteError
 from .adapter import build_observation, frame_rgb
-from .execution import ChunkExecution
+from .execution import ChunkExecution,DEFAULT_REQUEST_AFTER_FRACTION
 from .kinematics import G1Kinematics
 from .server_client import ModelClient
 
 
-def load_config(path, *, instruction=None):
+def load_config(path, *, instruction=None,request_after_fraction=None):
     value = yaml.safe_load(Path(path).read_text())
     if instruction is not None and isinstance(value,dict):value['instruction']=instruction
+    if request_after_fraction is not None and isinstance(value,dict):value['request_after_fraction']=request_after_fraction
     required = {'robot_target', 'model_server_url', 'instruction', 'period_s', 'gripper_mapping'}
-    if not isinstance(value, dict) or not required <= value.keys() or set(value) - required - {'horizon', 'model_timeout_s', 'rpc_timeout_s', 'observation_timeout_s', 'command_hz', 'projection', 'diagnostics', 'record_inputs', 'image_encoding', 'jpeg_quality', 'image_size'}:
+    if not isinstance(value, dict) or not required <= value.keys() or set(value) - required - {'horizon', 'model_timeout_s', 'rpc_timeout_s', 'observation_timeout_s', 'command_hz', 'projection', 'diagnostics', 'record_inputs', 'image_encoding', 'jpeg_quality', 'image_size','request_after_fraction'}:
         raise ValueError('invalid Adapter configuration fields')
     target = urlparse('//' + str(value['robot_target']))
     model = urlparse(str(value['model_server_url']))
@@ -41,6 +42,10 @@ def load_config(path, *, instruction=None):
     value.setdefault('command_hz',30.)
     value.setdefault('diagnostics',False)
     value.setdefault('record_inputs',False)
+    value.setdefault('request_after_fraction',DEFAULT_REQUEST_AFTER_FRACTION)
+    fraction=value['request_after_fraction']
+    if type(fraction)not in (int,float)or not math.isfinite(fraction)or not 0<=fraction<=1:
+        raise ValueError('request_after_fraction must be finite within [0,1]')
     size=value.get('image_size')
     if size is not None and (not isinstance(size,list) or len(size)!=2 or any(type(v)is not int or not 0<v<=limit for v,limit in zip(size,(640,480)))):
         raise ValueError('image_size must be [width,height] within 640x480')
@@ -114,7 +119,8 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
         observation_trace.append(row)
         return result
     player = ChunkExecution(model_factory=lambda: ModelClient.connect(config['model_server_url'],
-        period_s=config['period_s'], horizon=config['horizon'], timeout=config['model_timeout_s']), observe=observe)
+        period_s=config['period_s'], horizon=config['horizon'], timeout=config['model_timeout_s']), observe=observe,
+        request_after_fraction=config.get('request_after_fraction',DEFAULT_REQUEST_AFTER_FRACTION))
     report = dict(scope=('live PAOS observations -> WLA model; base3 and experimental arm/gripper projection'if projection else 'live PAOS observations -> WLA model; base3 only') if not probe else 'live observation/model probe; no input ownership or commands',
         configuration=config, run_id=observer.run_id, goal_count=0, paused=False, close_error=None,
         input_control='not_acquired',
@@ -268,6 +274,7 @@ def main():
     duration.add_argument('--seconds', type=float, default=10)
     duration.add_argument('--until-stopped',action='store_true',help='keep control until Ctrl+C/SIGTERM; no automatic task completion')
     parser.add_argument('--instruction',help='task prompt override; preserve configured endpoints')
+    parser.add_argument('--request-after-fraction',type=float,help='capture the next observation after this fraction of chunk playback; default 2/3, 1 waits until end')
     parser.add_argument('--output', required=True)
     parser.add_argument('--probe', action='store_true', help='read and infer once; never acquire input or send goals')
     args = parser.parse_args()
@@ -278,7 +285,7 @@ def main():
         signal.signal(getattr(signal, name), lambda *_: stop.set())
     if hasattr(signal, 'SIGUSR1'):
         signal.signal(signal.SIGUSR1, lambda *_: resume.set())
-    result = run(load_config(args.config,instruction=args.instruction), seconds=None if args.until_stopped else args.seconds, output=args.output,
+    result = run(load_config(args.config,instruction=args.instruction,request_after_fraction=args.request_after_fraction), seconds=None if args.until_stopped else args.seconds, output=args.output,
                  probe=args.probe, stop=stop, resume=resume)
     print(json.dumps({k:result.get(k) for k in ('scope','run_id','responses','goal_count','paused','error','close_error','stop_reason','input_control')}), flush=True)
     if result.get('close_error') is not None or not result.get('responses') or (not args.probe and not result['goal_count']):
