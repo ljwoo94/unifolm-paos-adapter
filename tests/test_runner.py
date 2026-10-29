@@ -12,7 +12,9 @@ gripper_mapping:
   kind: dex1_native_rad
   offsets: {left: 0, right: 0}
 ''')
+    p.write_text(p.read_text()+'image_size: [448, 320]\n')
     c=load_config(p)
+    assert c['image_size']==[448,320]
     assert c['robot_target']=='192.168.1.10:15051'
     assert c['model_server_url']=='ws://127.0.0.1:18600'
     assert c['horizon']==30
@@ -110,9 +112,10 @@ def test_explicit_jpeg_is_requested_without_diagnostics(tmp_path,monkeypatch):
     monkeypatch.setattr(runner,'G1Kinematics',lambda:None)
     monkeypatch.setattr(runner,'build_observation',lambda *a,**k:{})
     c=dict(robot_target='robot:1',model_server_url='ws://model:2',instruction='walk',period_s=1/30,
-        horizon=30,model_timeout_s=1,rpc_timeout_s=1,gripper_mapping={},image_encoding='jpeg',jpeg_quality=70,diagnostics=False)
+        horizon=30,model_timeout_s=1,rpc_timeout_s=1,gripper_mapping={},image_encoding='jpeg',jpeg_quality=70,diagnostics=False,image_size=[448,320])
     runner.run(c,seconds=1,output=tmp_path/'run',probe=True)
     assert calls and calls[0]['image_encoding']=='jpeg' and calls[0]['jpeg_quality']==70
+    assert calls[0]['image_size']==[448,320]
 
 
 def test_final_trace_includes_observation_completed_during_stop(tmp_path,monkeypatch):

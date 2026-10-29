@@ -22,7 +22,7 @@ def load_config(path, *, instruction=None):
     value = yaml.safe_load(Path(path).read_text())
     if instruction is not None and isinstance(value,dict):value['instruction']=instruction
     required = {'robot_target', 'model_server_url', 'instruction', 'period_s', 'gripper_mapping'}
-    if not isinstance(value, dict) or not required <= value.keys() or set(value) - required - {'horizon', 'model_timeout_s', 'rpc_timeout_s', 'observation_timeout_s', 'command_hz', 'projection', 'diagnostics', 'record_inputs', 'image_encoding', 'jpeg_quality'}:
+    if not isinstance(value, dict) or not required <= value.keys() or set(value) - required - {'horizon', 'model_timeout_s', 'rpc_timeout_s', 'observation_timeout_s', 'command_hz', 'projection', 'diagnostics', 'record_inputs', 'image_encoding', 'jpeg_quality', 'image_size'}:
         raise ValueError('invalid Adapter configuration fields')
     target = urlparse('//' + str(value['robot_target']))
     model = urlparse(str(value['model_server_url']))
@@ -41,6 +41,9 @@ def load_config(path, *, instruction=None):
     value.setdefault('command_hz',30.)
     value.setdefault('diagnostics',False)
     value.setdefault('record_inputs',False)
+    size=value.get('image_size')
+    if size is not None and (not isinstance(size,list) or len(size)!=2 or any(type(v)is not int or not 0<v<=limit for v,limit in zip(size,(640,480)))):
+        raise ValueError('image_size must be [width,height] within 640x480')
     value.setdefault('image_encoding','rgb8');value.setdefault('jpeg_quality',80)
     if value['image_encoding']not in ('rgb8','jpeg')or type(value['jpeg_quality'])is not int or not 1<=value['jpeg_quality']<=95:raise ValueError('unsupported image encoding/quality')
     for field in ('period_s', 'model_timeout_s', 'rpc_timeout_s', 'observation_timeout_s', 'command_hz'):
@@ -92,6 +95,7 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
         options={}
         if config.get('diagnostics'):options['diagnostics']=True
         if 'image_encoding'in config:options.update(image_encoding=config['image_encoding'],jpeg_quality=config.get('jpeg_quality',80))
+        if config.get('image_size') is not None:options['image_size']=config['image_size']
         snapshot=observer.observe(**options)
         received=time.monotonic()
         result=build_observation(snapshot, kinematics=kinematics, instruction=config['instruction'],

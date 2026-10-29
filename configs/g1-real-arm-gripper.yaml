@@ -24,3 +24,5 @@ projection:
 record_inputs: false
 robot_target: 192.168.123.164:15051
 rpc_timeout_s: 2
+
+image_size: [448, 320]
