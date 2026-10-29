@@ -21,4 +21,5 @@ def test_projection_uses_current_chunk_ee_and_explicit_gripper_endpoints():
     assert value['grippers']==pytest.approx({'left':.5,'right':1.})
     assert value['gripper_saturated']==['right']
     assert value['ik']['converged']
+    assert value['ik']['backend']=='placo'
     assert chunk.actions['action.right_gripper'][0,10,0]==5.5

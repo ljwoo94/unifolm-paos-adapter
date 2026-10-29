@@ -4,7 +4,7 @@ from unifolm_paos_adapter.inverse_kinematics import ArmIK
 from unifolm_paos_adapter.kinematics import G1Kinematics
 
 
-def test_cached_chain_matches_original_urdf_with_measured_waist_and_tool_offset():
+def test_placo_matches_original_urdf_with_measured_waist_and_tool_offset():
     solver=ArmIK();reference=G1Kinematics();rng=np.random.default_rng(5)
     for _ in range(12):
         q=rng.uniform(-.15,.15,29)
