@@ -6,10 +6,13 @@ WLA에서 실행하는 모델 측 Adapter. `paos-remote` 경량 SDK와 공식 Un
 
 ```sh
 unifolm-paos --config configs/adapter.example.yaml --probe --seconds 45 --output runs/probe
-unifolm-paos --config configs/adapter.example.yaml --seconds 10 --output runs/control
+unifolm-paos --config configs/adapter.example.yaml \
+  --instruction "Move forward slowly." --until-stopped --output runs/control
 ```
 
-한 제어 세션으로 전체 입력권을 소유하고 base3만 적용한다. 출력7field는 모두 검사·보존한다. 모델 오류는 추론 일시 정지이며 현재 chunk 소진 후 원래 목표 TTL을 따른다. SIGUSR1은 명시적 재개, SIGINT/SIGTERM은 정상 종료다. 재개 전에 기존 제어 세션/run을 확인하며 자동 입력권 재획득·모델 요청 재시도는 없다. 비정상 로봇 RPC 오류는 transport만 폐기한다.
+`--until-stopped`는 운영자가 Adapter 터미널에서 Ctrl+C를 누를 때까지 실행한다. 정상 종료는 자기 목표 취소·입력권 반납을 모델 worker 정리보다 먼저 처리한다. 모델 서버는 계속 켜두고, 다음 프롬프트는 새 output 경로로 Adapter를 다시 실행한다. 모델 응답에 완료 신호가 없으므로 작업 성공을 자동 판정하지 않는다. 짧은 시험은 `--seconds 5`로 제한할 수 있다. `--instruction`은 설정 파일과 연결 주소를 변경하지 않는 프롬프트 덮어쓰기다.
+
+한 제어 세션으로 전체 입력권을 소유하고 기본 설정에서는 base3만 적용한다. 출력7field는 모두 검사·보존한다. 모델 오류는 추론 일시 정지이며 현재 chunk 소진 후 원래 목표 TTL을 따른다. SIGUSR1은 명시적 재개, SIGINT/SIGTERM은 정상 종료다. 재개 전에 기존 제어 세션/run을 확인하며 자동 입력권 재획득·모델 요청 재시도는 없다. 비정상 로봇 RPC 오류는 transport만 폐기한다.
 
 모델 단독 실행은 `model_runtime/benchmark.py`, 공식 입력/출력 변환을 사용한 native W8A8 서버는 `model_runtime/server.py`다. WMA_MODEL_BUNDLE은 기존 checkpoint 경로, WMA_TORCH_COMPILE=1, WMA_COMPILE_PROFILE은 baseline / max-autotune / max-autotune-no-cudagraphs 중 명시적으로 선택한다. max-autotune 실패 시 자동 fallback하지 않는다. model_runtime/source-baseline.json과 PAOS 검증 보고에 원본·변경 범위와 실제 환경을 기록한다.
 

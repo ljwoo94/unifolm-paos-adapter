@@ -1,4 +1,4 @@
-"""Finite live Adapter. SIGUSR1 explicitly resumes paused model inference."""
+"""Live Adapter with a time limit or operator Stop. SIGUSR1 resumes inference."""
 import argparse
 from collections import deque
 import json
@@ -18,8 +18,9 @@ from .kinematics import G1Kinematics
 from .server_client import ModelClient
 
 
-def load_config(path):
+def load_config(path, *, instruction=None):
     value = yaml.safe_load(Path(path).read_text())
+    if instruction is not None and isinstance(value,dict):value['instruction']=instruction
     required = {'robot_target', 'model_server_url', 'instruction', 'period_s', 'gripper_mapping'}
     if not isinstance(value, dict) or not required <= value.keys() or set(value) - required - {'horizon', 'model_timeout_s', 'rpc_timeout_s', 'observation_timeout_s', 'command_hz', 'projection', 'diagnostics', 'record_inputs', 'image_encoding', 'jpeg_quality'}:
         raise ValueError('invalid Adapter configuration fields')
@@ -69,8 +70,9 @@ def load_config(path):
 
 
 def run(config, *, seconds, output, probe=False, stop=None, resume=None):
-    if type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0 < seconds <= 3600:
-        raise ValueError('finite experiment duration in (0,3600] required')
+    if seconds is not None and (type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0 < seconds <= 3600):
+        raise ValueError('finite duration in (0,3600] or None for operator Stop required')
+    if probe and seconds is None:raise ValueError('probe requires a finite duration')
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     stop = stop or threading.Event()
@@ -111,7 +113,7 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
         period_s=config['period_s'], horizon=config['horizon'], timeout=config['model_timeout_s']), observe=observe)
     report = dict(scope=('live PAOS observations -> WLA model; base3 and experimental arm/gripper projection'if projection else 'live PAOS observations -> WLA model; base3 only') if not probe else 'live observation/model probe; no input ownership or commands',
         configuration=config, run_id=observer.run_id, goal_count=0, paused=False, close_error=None,
-        goals=[], robot_status_before=observer.status())
+        goals=[], duration_limit_s=seconds, robot_status_before=observer.status())
     goals = deque(maxlen=256)
     player_started = False
     latest = None
@@ -130,7 +132,7 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
         report['started_at']=started
         next_tick = started
         previous_pause = False
-        while not stop.is_set() and time.monotonic() - started < seconds:
+        while not stop.is_set() and (seconds is None or time.monotonic() - started < seconds):
             if resume.is_set():
                 resume.clear()
                 # A current status call rejects a changed OS run; never reacquire automatically.
@@ -192,20 +194,24 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
             if next_tick <= now:
                 next_tick += (math.floor((now-next_tick)/send_period)+1)*send_period
             stop.wait(max(0., next_tick-time.monotonic()))
-        report['elapsed_s'] = time.monotonic()-started
-        report['robot_status_after'] = observer.status()
-        report.update(player.snapshot())
-        report['goals'] = list(goals)
-        if latest is not None:
-            np.savez(output/'latest-actions.npz', **dict(latest.actions))
-            report['action_shapes'] = {k:list(v.shape) for k,v in latest.actions.items()}
         normal_stop = True
+        report['stop_reason']='operator_stop' if stop.is_set() else ('probe_end' if probe else 'duration_elapsed')
+        report['elapsed_s'] = time.monotonic()-started
     except BaseException as exc:
         report['error'] = f'{type(exc).__name__}: {exc}'
         raise
     finally:
         report['goals'] = list(goals)
         cleanup_errors = []
+        # Stop control before waiting for model/observation cleanup.
+        try:
+            if owner is not None:
+                if normal_stop:
+                    owner.close()
+                else:
+                    owner.abandon()
+        except Exception as exc:
+            report['close_error'] = str(exc)
         try:
             if player_started:
                 player.stop()
@@ -219,13 +225,15 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
         except Exception as exc:
             cleanup_errors.append(f'model cleanup: {exc}')
         try:
-            if owner is not None:
-                if normal_stop:
-                    owner.close()
-                else:
-                    owner.abandon()
+            if latest is not None:
+                np.savez(output/'latest-actions.npz', **dict(latest.actions))
+                report['action_shapes'] = {k:list(v.shape) for k,v in latest.actions.items()}
         except Exception as exc:
-            report['close_error'] = str(exc)
+            cleanup_errors.append(f'action export: {exc}')
+        try:
+            report['robot_status_after']=observer.status()
+        except Exception as exc:
+            cleanup_errors.append(f'final status: {exc}')
         try:
             observer.close()
         except Exception as exc:
@@ -242,19 +250,23 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True)
-    parser.add_argument('--seconds', type=float, default=10)
+    duration=parser.add_mutually_exclusive_group()
+    duration.add_argument('--seconds', type=float, default=10)
+    duration.add_argument('--until-stopped',action='store_true',help='keep control until Ctrl+C/SIGTERM; no automatic task completion')
+    parser.add_argument('--instruction',help='task prompt override; preserve configured endpoints')
     parser.add_argument('--output', required=True)
     parser.add_argument('--probe', action='store_true', help='read and infer once; never acquire input or send goals')
     args = parser.parse_args()
+    if args.probe and args.until_stopped:parser.error('--probe requires a finite --seconds limit')
     stop = threading.Event()
     resume = threading.Event()
     for name in ('SIGINT', 'SIGTERM'):
         signal.signal(getattr(signal, name), lambda *_: stop.set())
     if hasattr(signal, 'SIGUSR1'):
         signal.signal(signal.SIGUSR1, lambda *_: resume.set())
-    result = run(load_config(args.config), seconds=args.seconds, output=args.output,
+    result = run(load_config(args.config,instruction=args.instruction), seconds=None if args.until_stopped else args.seconds, output=args.output,
                  probe=args.probe, stop=stop, resume=resume)
-    print(json.dumps({k:result.get(k) for k in ('scope','run_id','responses','goal_count','paused','error','close_error')}), flush=True)
+    print(json.dumps({k:result.get(k) for k in ('scope','run_id','responses','goal_count','paused','error','close_error','stop_reason')}), flush=True)
     if not result.get('responses') or (not args.probe and not result['goal_count']):
         raise SystemExit(1)
 

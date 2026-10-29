@@ -150,3 +150,53 @@ def test_final_trace_includes_observation_completed_during_stop(tmp_path,monkeyp
     result=runner.run(config,seconds=1,output=tmp_path/'run',probe=True)
     assert result['model_worker_stopped'] and result['observation_snapshot_complete']
     assert len(result['observations'])==2 and result['responses']==1
+
+
+@pytest.mark.parametrize('seconds',[None,1.0])
+def test_operator_stop_releases_control_before_waiting_for_model(tmp_path,monkeypatch,seconds):
+    import threading
+    from types import SimpleNamespace
+    import unifolm_paos_adapter.runner as runner
+    stop=threading.Event();events=[];clients=[]
+    class Robot:
+        run_id=73
+        def __init__(self):self.index=len(clients);clients.append(self)
+        def status(self):return {'enabled':True}
+        def acquire_control(self):pass
+        def set_velocity(self,*goal):return SimpleNamespace(run_id=73,goal_ref=1,accepted_ns=1,expires_ns=2)
+        def close(self):events.append('owner-close'if self.index else'observer-close')
+        def abandon(self):events.append('abandon')
+    class Player:
+        paused=False;alive=False
+        def __init__(self,**kwargs):self.count=0
+        def start(self):pass
+        def current_goal(self):
+            self.count+=1
+            if self.count==3:stop.set()
+            return (.1,0.,0.)
+        def latest_chunk(self):return SimpleNamespace(actions={'example':runner.np.zeros(1)})
+        def snapshot(self):return {'responses':1}
+        def stop(self):events.append('model-stop')
+        def join(self,timeout):events.append('model-join')
+    monkeypatch.setattr(runner.RemoteRobotClient,'connect',lambda *a,**k:Robot())
+    monkeypatch.setattr(runner,'G1Kinematics',lambda:None)
+    monkeypatch.setattr(runner,'ChunkExecution',Player)
+    def dump(*args,**kwargs):
+        assert 'owner-close'in events, 'control must stop before file export'
+    monkeypatch.setattr(runner.np,'savez',dump)
+    config=dict(robot_target='robot:1',model_server_url='ws://model:2',instruction='walk',
+        period_s=1/30,horizon=30,model_timeout_s=1,rpc_timeout_s=1,command_hz=100,gripper_mapping={})
+    result=runner.run(config,seconds=seconds,output=tmp_path/'run',stop=stop)
+    assert result['goal_count']==3 and result['normal_stop']
+    assert result['stop_reason']=='operator_stop'
+    assert events.index('owner-close')<events.index('model-stop')<events.index('model-join')
+
+
+def test_prompt_override_preserves_connection_configuration(tmp_path):
+    from pathlib import Path
+    path=tmp_path/'config.yaml'
+    path.write_text((Path(__file__).resolve().parents[1]/'configs/g1-real-base.yaml').read_text())
+    config=load_config(path,instruction='Pick up the banana.')
+    assert config['instruction']=='Pick up the banana.'
+    assert config['robot_target']=='192.168.123.164:15051'
+    assert 'Move forward slowly.'in path.read_text()
