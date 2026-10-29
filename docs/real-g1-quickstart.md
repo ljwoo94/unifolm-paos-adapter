@@ -1,0 +1,103 @@
+# 실물 G1 Quickstart
+
+WLA에서 모델·Adapter, G1에서 PAOS·Monitor를 실행합니다. 이 문서에는 Simulator나 Kitchen 실행 단계가 없습니다.
+
+## 1. WLA 환경 설치 — 최초 한 번
+
+이미 `/home/wla/paos-model-adapter`에 HTTPS clone했다면 그대로 사용합니다. 경량 SDK `paos_remote-0.2.0-py3-none-any.whl`을 WLA의 `/tmp/`로 전달한 뒤 실행합니다. 이 wheel은 비공개 PAOS 프로젝트에서 제공합니다.
+
+```sh
+cd /home/wla/paos-model-adapter
+/home/wla/WMA-JLee/.venv311/bin/python -m venv .venv-adapter
+.venv-adapter/bin/python -m pip install /tmp/paos_remote-0.2.0-py3-none-any.whl -e .
+mkdir -p private runs
+cp configs/g1-real-base.yaml private/g1.yaml
+.venv-adapter/bin/python -m pip check
+scripts/serve_wla.sh --check
+```
+
+기존 환경과 `private/g1.yaml`이 있으면 venv 생성과 `cp`는 생략합니다. 기존 모델 환경은 변경하지 않습니다.
+
+## 2. 실물 설정 확인 — WLA
+
+`private/g1.yaml`은 다음 주소와 첫 시험 지시문을 사용합니다.
+
+```yaml
+robot_target: 192.168.123.164:15051
+model_server_url: ws://127.0.0.1:18610
+instruction: Move forward slowly.
+```
+
+이 기본 설정은 base 속도만 적용합니다. 연결 전 확인은 다음과 같습니다.
+
+```sh
+ip route get 192.168.123.164
+nmcli device status
+```
+
+현재 설치의 유선 연결명은 `wma-g1-direct`, WLA 주소는 `192.168.123.222/24`입니다. 로봇 전원·케이블을 연결하고 이 NetworkManager 연결이 활성화되어야 합니다. WLA의 모델 서버 기동은 로봇 연결 없이 가능합니다.
+
+## 3. 모델 서버 시작 — WLA 터미널 A
+
+이미 `127.0.0.1:18610`에서 실행 중이면 중복으로 시작하지 않습니다. 이번 설치에서 백그라운드로 시작한 서버는 `runs/model-server.pid`와 `runs/model-server.log`에 PID·로그가 있습니다. `tail -f runs/model-server.log`로 확인할 수 있습니다. 서버가 없을 때 다음처럼 실행합니다.
+
+```sh
+cd /home/wla/paos-model-adapter
+scripts/serve_wla.sh
+```
+
+`MODEL_READY`와 `127.0.0.1:18610`의 listening 로그를 기다립니다. 시작 시 저장 입력으로 warmup·수치 검사를 수행합니다. 이 단계는 로봇에 접속하거나 명령을 보내지 않습니다. 기존 W8A8 checkpoint를 사용하며 RTC는 꺼져 있습니다. 기본 compile은 성공 이력이 있는 `baseline`이고, 요청한 옵션은 `WMA_COMPILE_PROFILE=max-autotune scripts/serve_wla.sh`로 선택할 수 있습니다. 실패 시 자동 fallback은 없습니다.
+
+## 4. 로봇 준비 — G1 Monitor
+
+PAOS가 실물 프로필 `profiles/g1_real_orin_groot.yaml` 또는 설치된 대응 프로필을 사용하고 있는지 확인합니다. 현재 G1은 DDS domain0/eth0, `hal.mode_machine: 5`, 양손 Dex1 설정을 사용합니다. `paos status`에서 state가 존재하고 HAL/WBC가 Green이어야 합니다.
+
+1. Monitor에서 Ready/Home pose 실행.
+2. 지지를 내려 양발을 바닥에 접지.
+3. 같은 Monitor에서 Start WBC.
+4. 지지 해제 후 자세 안정화 확인.
+5. Monitor의 Release control / 입력권 반납 완료 확인.
+
+설치·모델 서버 시작은 이 준비 절차를 대신하지 않습니다.
+
+## 5. 실물 관측·추론 확인 — WLA 터미널 B
+
+로봇 준비가 끝난 후 실행합니다. 입력권을 획득하거나 목표를 보내지 않습니다.
+
+```sh
+cd /home/wla/paos-model-adapter
+RUN_TAG=$(date +%Y%m%d-%H%M%S)
+.venv-adapter/bin/unifolm-paos --config private/g1.yaml \
+  --probe --seconds 45 --output "runs/probe-$RUN_TAG"
+```
+
+`responses ≥ 1`, `goal_count = 0`, `error = null`을 확인합니다. 실패하면 제어를 시작하지 않습니다.
+
+## 6. 프롬프트 제어·Stop — WLA 터미널 B
+
+이 명령부터 로봇 목표를 전송합니다. 로봇 안정화와 입력권 반납 후 실행합니다.
+
+```sh
+RUN_TAG=$(date +%Y%m%d-%H%M%S)
+.venv-adapter/bin/unifolm-paos --config private/g1.yaml \
+  --instruction "Move forward slowly." --until-stopped \
+  --output "runs/control-$RUN_TAG"
+```
+
+운영자가 **터미널 B에서 Ctrl+C**를 누를 때까지 실행합니다. 정상 Stop은 자기 목표 취소·입력권 반납을 먼저 처리하고 추론 worker를 정리합니다. Monitor 창을 닫는 것은 Adapter Stop이 아닙니다. 모델 서버 A는 계속 켜두고, 다음 프롬프트는 새 `RUN_TAG`로 Adapter만 다시 실행합니다. 첫 제어를 5초로 제한하려면 `--until-stopped` 대신 `--seconds 5`를 사용합니다.
+
+모델에 자동 작업 완료 신호는 없습니다. 추론 오류는 재시도 없이 일시 정지하고 입력권을 유지합니다. 명시적 재개는 `kill -USR1 <Adapter-PID>`, 종료는 Ctrl+C입니다. 로봇 RPC 오류로 세션이 끊긴 경우 자동 재획득하지 않으며 수락된 목표는 원래 TTL을 따릅니다.
+
+## 7. 갱신·종료
+
+Adapter를 Stop한 뒤 갱신합니다. `private/g1.yaml`은 유지합니다.
+
+```sh
+cd /home/wla/paos-model-adapter
+git pull --ff-only
+.venv-adapter/bin/python -m pip install -e .
+```
+
+SDK 버전 변경 시에만 새 wheel도 설치합니다. 모델 서버 코드가 변경됐다면 서버도 재시작합니다. 모든 실험을 마치면 Adapter를 먼저 Stop하고, 터미널 A의 모델 서버를 Ctrl+C로 종료합니다. 이번 설치의 백그라운드 서버는 해당 PID가 이 모델 서버인지 확인한 후 `kill -TERM "$(cat runs/model-server.pid)"`로 종료합니다. 결과는 각 `runs/.../result.json`에 남습니다.
+
+팔·그리퍼 적용은 `configs/g1-real-arm-gripper.yaml`을 별도 `private/` 설정으로 복사해 선택합니다. 프롬프트만 바꿔서는 팔 제어가 켜지지 않습니다. 이 경로는 base3·arm14·Dex1을 적용하며, measured q29 기반 PlaCo IK를 사용합니다. IK 미수렴 근사값도 전송하는 현재 실험 정책이 있어 base 입력 확인과 구분해 검증해야 합니다.
