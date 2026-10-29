@@ -7,6 +7,7 @@ import time
 import numpy as np
 from scipy.spatial.transform import Rotation
 from .kinematics import G1Kinematics
+from .arm_chain import ArmChain
 
 
 class ArmIK:
@@ -19,21 +20,19 @@ class ArmIK:
         joints=self.kinematics.model.joint_map
         self.lower=np.array([joints[n].limit.lower for n in self.names])
         self.upper=np.array([joints[n].limit.upper for n in self.names])
+        self.chains={side:ArmChain(self.kinematics,side)for side in ['left','right']}
+        self._jacobians={}
+
+    def _arm_state(self,q,side):
+        return self.chains[side].evaluate(q)
 
     def _state(self,q,side):
-        k=self.kinematics;k.model.update_cfg(dict(zip(k.names,map(float,q))))
-        transform=k.model.get_transform(frame_to=f'{side}_wrist_yaw_link',frame_from='pelvis')
-        return (transform@k.offset)[:3],transform[:3,:3]
+        position,rotation,jacobian=self._arm_state(q,side)
+        self._jacobians[side]=jacobian
+        return position,rotation
 
     def _jacobian(self,side,position):
-        k=self.kinematics;columns=[]
-        offset=0 if side=='left'else 7
-        for name in self.names[offset:offset+7]:
-            joint=k.model.joint_map[name]
-            frame=k.model.get_transform(frame_to=joint.parent,frame_from='pelvis')@joint.origin
-            axis=frame[:3,:3]@joint.axis
-            columns.append(np.r_[np.cross(axis,position-frame[:3,3]),axis])
-        return np.stack(columns,axis=1)
+        return self._jacobians[side]
 
     def solve(self,q,targets):
         started=time.perf_counter();q=np.asarray(q,dtype=float).copy()
