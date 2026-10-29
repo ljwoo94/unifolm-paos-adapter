@@ -22,3 +22,5 @@ Kitchen 실험 설정 `configs/kitchen-rgb.yaml`/`kitchen-jpeg.yaml`은 base3에
 실제 작업 추론은 Ready/Homepose→발 접지→WBC→줄 지지 해제와 자세 안정화가 완료된 후 시작한다. optional JPEG는 Orin NX에서 raw 대비 우위가 검증된 기본값이 아니다. Mac/WLA Wi-Fi 시험과 Orin NX/WLA1Gbps Ethernet 측정은 분리한다. `record_inputs`와 diagnostics는 관측/모델/명령별 측정과256bundle 이내 입력 보관을 위한 실험 옵션이다.
 
 0.3.0부터 팔 IK 기본 backend는 PlaCo다. 기존 자체 DLS는 패키지에서 제거하고 비교용 commit29dfbf3에 보존했다. 측정 waist/lower15와 floating base를 고정하고 양팔만 함께 최적화한다. [성능 비교와 재현 방법](docs/ik-performance.md)에 수치·제약을 기록했다. WLA/실물에 자동 배포하지 않는다.
+
+실물 G1 실행용 설정은 `configs/g1-real-base.yaml`, `configs/g1-real-arm-gripper.yaml`입니다. `scripts/serve_wla.sh`가 기존 W8A8 checkpoint·Python·compile 환경을 선택합니다. 기본 로봇 주소는 유선192.168.123.164:15051이며 실제 WLA→G1 네트워크 도달성을 먼저 확인합니다. 모델/Adapter를 시작하는 것만으로 Homepose/WBC 준비나 입력권 반납이 이루어지지는 않습니다.

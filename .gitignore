@@ -8,3 +8,6 @@ runs/
 
 build/
 dist/
+
+.venv-adapter/
+private/

@@ -1,0 +1,26 @@
+command_hz: 10
+diagnostics: true
+gripper_mapping:
+  kind: dex1_native_rad
+  offsets:
+    left: 0.0
+    right: 0.0
+horizon: 30
+instruction: Pick up a banana from the wooden table.
+model_server_url: ws://127.0.0.1:18610
+model_timeout_s: 30
+observation_timeout_s: 5
+period_s: 0.03333333333333333
+projection:
+  duration_s: 0.1
+  gripper_endpoints:
+    left:
+    - 0.0
+    - 5.4
+    right:
+    - 0.0
+    - 5.4
+  kind: arm_ee_gripper
+record_inputs: false
+robot_target: 192.168.123.164:15051
+rpc_timeout_s: 2
