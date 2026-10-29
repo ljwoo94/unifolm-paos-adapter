@@ -34,7 +34,7 @@ def build_observation(observation,*,kinematics,instruction,gripper_mapping):
             if frame['metadata']['run_id']!=robot['run_id']or frame['metadata']['camera']!=name:
                 raise InputUnavailable('camera run/role mismatch')
             h,w=frame['height'],frame['width']
-            if type(h)is not int or type(w)is not int or not 0<h<=240 or not 0<w<=320 or frame['encoding']not in ('rgb8','jpeg'):
+            if type(h)is not int or type(w)is not int or not 0<h<=480 or not 0<w<=640 or frame['encoding']not in ('rgb8','jpeg'):
                 raise InputUnavailable('unsupported RGB dimensions/encoding')
             rgb=frame_rgb(frame)
             # Official server consumes BGR and performs its own BGR->RGB/resize.

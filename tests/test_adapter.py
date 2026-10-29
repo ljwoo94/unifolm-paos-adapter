@@ -51,6 +51,63 @@ def test_observation_bgr_ee_native_rad_and_no_double_normalization():
     np.testing.assert_array_equal(restored['observation.images.cam_left_high'],value['observation.images.cam_left_high'])
 
 
+def snapshot_with_rgb_frames(width,height):
+    data=snapshot();pixels={}
+    rows,columns=np.indices((height,width))
+    for index,name in enumerate(['head','left_wrist','right_wrist']):
+        rgb=np.empty((height,width,3),np.uint8)
+        rgb[:,:,0]=(columns+index)%256
+        rgb[:,:,1]=(rows+7*index)%256
+        rgb[:,:,2]=(rows+columns+31*index)%256
+        rgb[0,0]=[11+index,22+index,33+index]
+        rgb[-1,-1]=[44+index,55+index,66+index]
+        data['frames'][name].update(width=width,height=height,rgb=rgb.tobytes())
+        pixels[name]=rgb
+    return data,pixels
+
+
+@pytest.mark.parametrize('width,height',[(320,240),(640,480)])
+def test_raw_qvga_and_vga_preserve_all_camera_pixels_and_roles(width,height):
+    data,pixels=snapshot_with_rgb_frames(width,height)
+    value=build_observation(data,kinematics=G1Kinematics(),instruction='pick carrot',
+        gripper_mapping={'kind':'dex1_native_rad','offsets':{'left':0.,'right':0.}})
+    for index,(name,role)in enumerate([('head','cam_left_high'),
+            ('left_wrist','cam_left_wrist'),('right_wrist','cam_right_wrist')]):
+        image=value[f'observation.images.{role}']
+        assert image.shape==(height,width,3) and image.dtype==np.uint8
+        assert image.flags.c_contiguous
+        assert image[0,0].tolist()==[33+index,22+index,11+index]
+        assert image[-1,-1].tolist()==[66+index,55+index,44+index]
+        np.testing.assert_array_equal(image[:,:,0],pixels[name][:,:,2])
+        np.testing.assert_array_equal(image[:,:,1],pixels[name][:,:,1])
+        np.testing.assert_array_equal(image[:,:,2],pixels[name][:,:,0])
+
+
+@pytest.mark.parametrize('instruction',['pick carrot','🥕'*8192],ids=['short','max-utf8'])
+def test_three_raw_vga_model_request_fits_websocket_limit(instruction):
+    data,_=snapshot_with_rgb_frames(640,480)
+    value=build_observation(data,kinematics=G1Kinematics(),instruction=instruction,
+        gripper_mapping={'kind':'dex1_native_rad','offsets':{'left':0.,'right':0.}})
+    packed=msgpack_numpy.packb({'type':'get_action','obs':value})
+    assert sum(image.nbytes for key,image in value.items()if key.startswith('observation.images.'))==2_764_800
+    assert len(packed)<4*1024*1024
+    restored=msgpack_numpy.unpackb(packed)
+    assert restored['type']=='get_action' and restored['obs']['instruction']==instruction
+    for role in ['cam_left_high','cam_left_wrist','cam_right_wrist']:
+        key=f'observation.images.{role}'
+        np.testing.assert_array_equal(restored['obs'][key],value[key])
+
+
+@pytest.mark.parametrize('name',['head','left_wrist','right_wrist'])
+@pytest.mark.parametrize('width,height',[(641,480),(640,481)])
+def test_camera_dimensions_above_vga_are_rejected(name,width,height):
+    data=snapshot()
+    data['frames'][name].update(width=width,height=height,rgb=bytes(width*height*3))
+    with pytest.raises(InputUnavailable,match='unsupported RGB dimensions/encoding'):
+        build_observation(data,kinematics=G1Kinematics(),instruction='pick carrot',
+            gripper_mapping={'kind':'dex1_native_rad','offsets':{'left':0.,'right':0.}})
+
+
 @pytest.mark.parametrize('kind',['missing_frame','red_state','red_gripper','wrong_run','bad_buffer'])
 def test_incomplete_inputs_are_not_fabricated(kind):
     data=snapshot()
