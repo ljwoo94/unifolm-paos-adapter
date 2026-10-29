@@ -1,0 +1,2 @@
+# Preserve the exact upstream URDF bytes/hash, including its original CRLF.
+src/unifolm_paos_adapter/assets/*.urdf -text

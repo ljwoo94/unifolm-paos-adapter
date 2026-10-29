@@ -1,0 +1,10 @@
+robot_target: 192.168.1.10:15051
+model_server_url: ws://127.0.0.1:18600
+instruction: Move forward slowly.
+period_s: 0.03333333333333333
+horizon: 30
+model_timeout_s: 30
+rpc_timeout_s: 2
+gripper_mapping:
+  kind: dex1_native_rad
+  offsets: {left: 0.0, right: 0.0}

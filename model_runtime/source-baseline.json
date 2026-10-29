@@ -1,0 +1,12 @@
+[
+  {
+    "name": "compiled_ops.py",
+    "source": "wla:/home/wla/WMA-JLee/compiled_ops.py",
+    "sha256": "c2405ca858a62060e9c0a4bc5b09fb2d1d824cf2c954ee15cc8ce92efd1fda79"
+  },
+  {
+    "name": "runtime.py",
+    "source": "wla:/home/wla/WMA-JLee/runtime.py",
+    "sha256": "dcc496c691b1249b0cfe345b1ab3e52273f099296d43817418ea029f0457917e"
+  }
+]

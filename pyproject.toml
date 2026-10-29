@@ -1,0 +1,17 @@
+[build-system]
+requires=["setuptools>=77"]
+build-backend="setuptools.build_meta"
+[project]
+name="unifolm-paos-adapter"
+version="0.1.0"
+requires-python=">=3.11,<3.14"
+dependencies=["paos-remote==0.1.0","numpy>=1.26,<3","yourdfpy==0.0.60","websockets==16.0","msgpack>=1.1,<2","PyYAML>=6,<7"]
+[project.scripts]
+unifolm-paos="unifolm_paos_adapter.runner:main"
+[tool.setuptools.packages.find]
+where=["src"]
+[tool.pytest.ini_options]
+pythonpath=["src"]
+
+[tool.setuptools.package-data]
+unifolm_paos_adapter=["assets/*.urdf","assets/*.json","assets/*LICENSE","_vendor/*LICENSE"]

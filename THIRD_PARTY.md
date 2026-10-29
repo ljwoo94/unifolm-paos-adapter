@@ -1,0 +1,5 @@
+# Third-party sources
+
+- `src/unifolm_paos_adapter/_vendor/msgpack_numpy.py`: exact UniFoLM-WLA NumPy MessagePack implementation, upstream AGIBOT-Tech/UniFoLM-WLA; license preserved beside it as UNIFOLM_LICENSE. This is raw ndarray serialization, without added image compression.
+- `src/unifolm_paos_adapter/assets/g1_29dof_mode_15_with_dex1_1.urdf`: exact prepared Unitree G1 SIM robot asset, SHA2561a0a4f493d6686cd93952d8e67d6144d4c337929151c745e0440b8a28f08ed1a. Source directory Warehouse_Picking_Cart_G1_Dex1_1/robot in the user’s prepared Robot_Demo_Environments_20261022 distribution. The accompanying UNITREE_LICENSE is preserved unchanged. No mesh files or modified geometry are bundled.
+- `model_runtime/runtime.py` and `compiled_ops.py` originate from the user-provided WMA-JLee experiment; source-baseline.json records original hashes. Only model loading/W8A8 inference/compile mechanisms are reused. The current code excludes RTC and direct controller/robot paths. Existing checkpoint and original environment are read-only inputs; no weights are included in this repository.
