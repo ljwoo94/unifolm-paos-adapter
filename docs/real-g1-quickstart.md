@@ -88,6 +88,10 @@ RUN_TAG=$(date +%Y%m%d-%H%M%S)
 
 운영자가 **터미널 B에서 Ctrl+C**를 누를 때까지 실행합니다. 정상 Stop은 자기 목표 취소·입력권 반납을 먼저 처리하고 추론 worker를 정리합니다. Monitor 창을 닫는 것은 Adapter Stop이 아닙니다. 모델 서버 A는 계속 켜두고, 다음 프롬프트는 새 `RUN_TAG`로 Adapter만 다시 실행합니다. 첫 제어를 5초로 제한하려면 `--until-stopped` 대신 `--seconds 5`를 사용합니다.
 
+시작 시 입력권 소유와 Ctrl+C 반납 안내가 출력됩니다. Ctrl+C 뒤에는 모델 worker 정리를 기다리기 전에 **`input_control_released`**가 출력됩니다. 반납·취소를 확인하지 못하면 `input_control_release_unknown`/`close_error`와 종료 코드1을 반환합니다. 모델 서버·WBC는 이 반납으로 종료되지 않습니다.
+
+Homepose로 돌아가려면 반납 확인 → 외부 지지 → Monitor의 Stop WBC → `last command held` → 별도 Homepose 순서입니다. 최신 PAOS Stop WBC는 직전 관절 목표·gain·피드포워드 토크를 고정하고 원하는 속도만1초 동안0으로 줄입니다. 측정각으로 목표를 바꾸거나 준비 gain으로 낮추지 않습니다. 균형 제어가 아니므로 외부 지지가 필요합니다. 다른 caller의 입력권을 강제로 반환하는 명령은 제공하지 않습니다.
+
 모델에 자동 작업 완료 신호는 없습니다. 추론 오류는 재시도 없이 일시 정지하고 입력권을 유지합니다. 명시적 재개는 `kill -USR1 <Adapter-PID>`, 종료는 Ctrl+C입니다. 로봇 RPC 오류로 세션이 끊긴 경우 자동 재획득하지 않으며 수락된 목표는 원래 TTL을 따릅니다.
 
 ## 7. 갱신·종료

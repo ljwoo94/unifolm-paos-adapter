@@ -113,6 +113,7 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
         period_s=config['period_s'], horizon=config['horizon'], timeout=config['model_timeout_s']), observe=observe)
     report = dict(scope=('live PAOS observations -> WLA model; base3 and experimental arm/gripper projection'if projection else 'live PAOS observations -> WLA model; base3 only') if not probe else 'live observation/model probe; no input ownership or commands',
         configuration=config, run_id=observer.run_id, goal_count=0, paused=False, close_error=None,
+        input_control='not_acquired',
         goals=[], duration_limit_s=seconds, robot_status_before=observer.status())
     goals = deque(maxlen=256)
     player_started = False
@@ -124,6 +125,9 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
             if owner.run_id != observer.run_id:
                 raise RuntimeError('OS restarted before input acquisition')
             owner.acquire_control()
+            report['input_control'] = 'owned'
+            print(json.dumps(dict(event='input_control_owned',run_id=owner.run_id,
+                release_control='Ctrl+C in this Adapter terminal cancels its goals and releases input; WBC and the separate model server keep running')),flush=True)
             if not owner.status()['enabled']:
                 raise RuntimeError('explicit Homepose/start_wbc preparation required before Adapter execution')
         player.start()
@@ -208,10 +212,16 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
             if owner is not None:
                 if normal_stop:
                     owner.close()
+                    report['input_control'] = 'released'
+                    print(json.dumps(dict(event='input_control_released',run_id=owner.run_id,
+                        wbc='unchanged',model_server='unchanged')),flush=True)
                 else:
                     owner.abandon()
+                    report['input_control'] = 'session_ended_without_cancellation'
         except Exception as exc:
-            report['close_error'] = str(exc)
+            report['close_error'] = f'{type(exc).__name__}: {exc}'
+            report['input_control'] = 'unknown'
+            print(json.dumps(dict(event='input_control_release_unknown',error=report['close_error'])),flush=True)
         try:
             if player_started:
                 player.stop()
@@ -266,8 +276,8 @@ def main():
         signal.signal(signal.SIGUSR1, lambda *_: resume.set())
     result = run(load_config(args.config,instruction=args.instruction), seconds=None if args.until_stopped else args.seconds, output=args.output,
                  probe=args.probe, stop=stop, resume=resume)
-    print(json.dumps({k:result.get(k) for k in ('scope','run_id','responses','goal_count','paused','error','close_error','stop_reason')}), flush=True)
-    if not result.get('responses') or (not args.probe and not result['goal_count']):
+    print(json.dumps({k:result.get(k) for k in ('scope','run_id','responses','goal_count','paused','error','close_error','stop_reason','input_control')}), flush=True)
+    if result.get('close_error') is not None or not result.get('responses') or (not args.probe and not result['goal_count']):
         raise SystemExit(1)
 
 
