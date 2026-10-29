@@ -2,6 +2,25 @@
 
 WLA에서 실행하는 모델 측 Adapter. `paos-remote` 경량 SDK와 공식 UniFoLM WebSocket/NumPy MessagePack 규격을 사용한다. OS·iceoryx2·Torch를 Adapter 의존성으로 요구하지 않는다. 모델 backend는 별도 model_runtime에서 기존 W8A8 bundle/모델 환경을 사용한다.
 
+## WLA 설치·갱신
+
+저장소: `git@github.com:ljwoo94/unifolm-paos-adapter.git` (비공개). WLA의 SSH 계정에 이 저장소와 `ljwoo94/Physical-Agent-Os` 읽기 권한이 필요하다. 기존 W8A8 모델 환경이 준비된 WLA에서 실행한다.
+
+```sh
+git clone git@github.com:ljwoo94/unifolm-paos-adapter.git /home/wla/paos-model-adapter
+cd /home/wla/paos-model-adapter
+uv venv --python /home/wla/WMA-JLee/.venv311/bin/python .venv-adapter
+uv pip install --python .venv-adapter/bin/python \
+  "paos-remote @ git+ssh://git@github.com/ljwoo94/Physical-Agent-Os.git@d8b85e921f1aa9a0646193e74166b51930dd1cac#subdirectory=clients/python" -e .
+mkdir -p private runs
+cp configs/g1-real-base.yaml private/g1.yaml
+scripts/serve_wla.sh --check
+```
+
+`paos-remote`는 OS 저장소의 경량 SDK 하위 패키지만 설치한다. checkpoint·Torch 환경·OS runtime은 설치하지 않는다. `private/`, `runs/`, 가상환경은 Git에서 제외한다.
+
+이후 갱신은 실행 중인 Adapter를 Stop한 뒤 `git pull --ff-only`와 위 `uv pip install` 명령을 실행한다. 모델 서버 코드도 바뀌었다면 서버를 재시작한다. `private/g1.yaml`은 다시 복사하지 않는다.
+
 `configs/adapter.example.yaml`에 robot_target과 model_server_url을 각각 설정한다. 기존 PAOS/SIM에서 명시적으로 Homepose/StartWbc를 완료한 뒤 준비 caller가 입력권을 반납해야 한다. 이 프로그램의 접속은 로봇 준비를 자동 시작하지 않는다.
 
 ```sh
