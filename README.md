@@ -2,6 +2,8 @@
 
 WLA에서 기존 UniFoLM W8A8 모델과 Adapter를 실행하고, G1 Orin NX의 PAOS에 유선으로 연결합니다. 실물 준비와 실행 순서는 **[실물 G1 Quickstart](docs/real-g1-quickstart.md)**를 따릅니다.
 
+0.3.5부터 다음 실제 관측은 기본적으로 현재 chunk의 2/3가 재생된 뒤 요청합니다. `request_after_fraction: 1.0` 또는 `--request-after-fraction 1`은 chunk 종료 후 요청합니다. 첫 관측은 즉시 요청합니다. 이는 재생 시간 기준이며 실제 관절 도착 판정은 아닙니다.
+
 | 실행 위치 | 구성 |
 |---|---|
 | WLA `/home/wla/paos-model-adapter` | 모델 서버·Adapter |

@@ -37,6 +37,51 @@ def wait_for(test):
         time.sleep(.002)
 
 
+@pytest.mark.parametrize('fraction',[None,1.0],ids=['default_20_of_30','after_chunk_end'])
+def test_default_next_observation_waits_for_chunk_progress(fraction):
+    second_observation=threading.Event();release=threading.Event();observations=[];received=[]
+    class Model:
+        def infer(self,obs):
+            if received:release.wait(2)
+            now=time.monotonic();received.append(now)
+            return ModelActionChunk.from_response(raw_chunk(),received_at=now,period_s=1/30)
+        def close(self):release.set()
+    def observe():
+        observations.append(time.monotonic())
+        if len(observations)>1:second_observation.set()
+        return observations[-1]
+    options={}if fraction is None else {'request_after_fraction':fraction}
+    player=ChunkExecution(model_factory=Model,observe=observe,**options)
+    player.start()
+    try:
+        wait_for(lambda:len(received)==1)
+        assert not second_observation.wait(.05), 'next observation requested before the first chunk progressed'
+        assert second_observation.wait(2)
+        assert observations[1]>=received[0]+(20/30 if fraction is None else fraction)
+    finally:player.stop();release.set();player.join(1)
+
+
+def test_stop_interrupts_wait_without_capturing_another_observation():
+    calls=[]
+    class Model:
+        def infer(self,obs):return ModelActionChunk.from_response(raw_chunk(),received_at=time.monotonic(),period_s=1/30)
+        def close(self):pass
+    player=ChunkExecution(model_factory=Model,observe=lambda:calls.append(time.monotonic()),request_after_fraction=1.)
+    player.start()
+    try:
+        wait_for(lambda:player.snapshot()['responses']==1)
+        player.stop();player.join(.2)
+        assert not player.alive
+        assert len(calls)==1
+    finally:player.stop();player.join(1)
+
+
+@pytest.mark.parametrize('fraction',[-.1,1.1,float('nan'),float('inf'),True])
+def test_invalid_observation_fraction_rejected_before_connecting(fraction):
+    with pytest.raises(ValueError,match='request_after_fraction'):
+        ChunkExecution(model_factory=lambda:None,observe=lambda:None,request_after_fraction=fraction)
+
+
 def test_single_inflight_independent_playback_pause_resume_and_stop():
     clock=[0.]
     release=threading.Event();calls=[]
@@ -53,7 +98,7 @@ def test_single_inflight_independent_playback_pause_resume_and_stop():
         def close(self):pass
     sequence=[0]
     def observe():sequence[0]+=1;return sequence[0]
-    player=ChunkExecution(model_factory=Model,observe=observe,clock=lambda:clock[0])
+    player=ChunkExecution(model_factory=Model,observe=observe,clock=lambda:clock[0],request_after_fraction=0.)
     player.start()
     try:
         wait_for(lambda:len(calls)==2)

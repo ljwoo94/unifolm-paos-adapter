@@ -23,6 +23,11 @@ gripper_mapping:
     assert c['robot_target']=='192.168.1.10:15051'
     assert c['model_server_url']=='ws://127.0.0.1:18600'
     assert c['horizon']==30
+    assert c['request_after_fraction']==2/3
+    assert load_config(p,request_after_fraction=1.)['request_after_fraction']==1.
+    for fraction in [-.1,1.1,float('nan'),float('inf'),True]:
+        with pytest.raises(ValueError,match='request_after_fraction'):
+            load_config(p,request_after_fraction=fraction)
     p.write_text('robot_target: 192.168.1.10\n')
     with pytest.raises(ValueError):load_config(p)
 
@@ -154,7 +159,8 @@ def test_final_trace_includes_observation_completed_during_stop(tmp_path,monkeyp
     monkeypatch.setattr(runner.ModelClient,'connect',lambda *a,**k:Model())
     monkeypatch.setattr(runner,'ChunkExecution',ControlledExecution)
     config=dict(robot_target='robot:1',model_server_url='ws://model:2',instruction='walk',period_s=1/30,
-        horizon=30,model_timeout_s=1,rpc_timeout_s=1,gripper_mapping={'kind':'dex1_native_rad','offsets':{'left':0.,'right':0.}},diagnostics=True)
+        horizon=30,model_timeout_s=1,rpc_timeout_s=1,gripper_mapping={'kind':'dex1_native_rad','offsets':{'left':0.,'right':0.}},diagnostics=True,
+        request_after_fraction=0.)  # This test isolates stop during an in-flight observation.
     result=runner.run(config,seconds=1,output=tmp_path/'run',probe=True)
     assert result['model_worker_stopped'] and result['observation_snapshot_complete']
     assert len(result['observations'])==2 and result['responses']==1
