@@ -15,6 +15,11 @@ gripper_mapping:
     p.write_text(p.read_text()+'image_size: [448, 320]\n')
     c=load_config(p)
     assert c['image_size']==[448,320]
+    original=p.read_text()
+    for size in ('[0, 1]', '[641, 1]', '[true, 2]', '[1.5, 2]', '[1]'):
+        p.write_text(original.replace('[448, 320]',size))
+        with pytest.raises(ValueError,match='image_size'):load_config(p)
+    p.write_text(original)
     assert c['robot_target']=='192.168.1.10:15051'
     assert c['model_server_url']=='ws://127.0.0.1:18600'
     assert c['horizon']==30
