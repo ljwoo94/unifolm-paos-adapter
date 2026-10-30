@@ -1,0 +1,39 @@
+{
+  "run_id": 6966870745682960331,
+  "source_file": "control-20261030-023502/result.json",
+  "source_sha256": "c9b5e29ba21718b10547befb1a4a71b6fd9949f5d965afa430a3b8eff5e90960",
+  "observation_roundtrip_s": {
+    "count": 42,
+    "median": 0.11463993650249904,
+    "p95": 0.12607316613939473,
+    "maximum": 0.24266214300587308
+  },
+  "model_loopback_roundtrip_s": {
+    "count": 42,
+    "median": 0.4436567954981001,
+    "p95": 0.44884787424525713,
+    "maximum": 0.4944140469888225
+  },
+  "observation_to_receipt_s": {
+    "count": 42,
+    "median": 0.5626520839941804,
+    "p95": 0.5832039348482795,
+    "maximum": 0.7405256459896918
+  },
+  "command_batch_rpc_s": {
+    "count": 256,
+    "median": 0.023714827497315127,
+    "p95": 0.05582521072938107,
+    "maximum": 0.09353440201084595
+  },
+  "command_scope": "last 256 retained dispatch records",
+  "image_bytes": 1290240,
+  "model_request_bytes": {
+    "count": 42,
+    "median": 1291097.0,
+    "p95": 1291097.0,
+    "maximum": 1291097.0
+  },
+  "model_request_rate_hz": 0.817923933399273,
+  "wifi_measured": false
+}
