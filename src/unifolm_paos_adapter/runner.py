@@ -125,7 +125,9 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
         configuration=config, run_id=observer.run_id, goal_count=0, paused=False, close_error=None,
         input_control='not_acquired',
         goals=[], duration_limit_s=seconds, robot_status_before=observer.status())
-    goals = deque(maxlen=256)
+    # Bounded diagnostic memory; retain the beginning of ordinary short runs.
+    # Serialization still happens after control release, not on every tick.
+    goals = deque(maxlen=4096)
     player_started = False
     latest = None
     normal_stop = False
@@ -168,6 +170,13 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
                 row=dict(at_s=begin-started,attempted_at=begin,velocity=goal,stages={})
                 goals.append(row)
                 body=latest_body[0]
+                if projection:
+                    # Capture exact solver inputs before it can fail. This makes
+                    # an observed bad target reproducible without moving a robot.
+                    row['ik_input']=dict(q=np.asarray(body['q'],dtype=float).tolist(),
+                        state_seq=body['state_seq'],
+                        tool_targets={side:sample[0].actions[f'action.{side}_ee_rpy'][0,sample[1]].tolist()
+                                      for side in ['left','right']})
                 projected=projection.targets(sample[0],sample[1],body['q'])if projection else None
                 def dispatch(name,call):
                     stage=dict(outcome='attempted');row['stages'][name]=stage
@@ -263,6 +272,9 @@ def run(config, *, seconds, output, probe=False, stop=None, resume=None):
         report['observations']=list(observation_trace)
         report['observation_snapshot_complete']=not player.alive
         report['attempt_count']=len(goals)
+        report['goal_trace_capacity']=goals.maxlen
+        retained_accepted=sum(row.get('stages',{}).get('base',{}).get('outcome')=='accepted'for row in goals)
+        report['accepted_goals_not_retained']=max(0,report['goal_count']-retained_accepted)
         (output/'result.json').write_text(json.dumps(report, indent=2, allow_nan=False)+'\n')
     return report
 

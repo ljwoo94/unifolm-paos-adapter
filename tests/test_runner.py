@@ -2,6 +2,50 @@ import pytest
 from unifolm_paos_adapter.runner import load_config
 
 
+def test_exact_ik_inputs_survive_projection_failure(tmp_path,monkeypatch):
+    import json,time
+    import unifolm_paos_adapter.runner as runner
+    import unifolm_paos_adapter.projection as projection
+    from unifolm_paos_adapter.chunk import ModelActionChunk
+    from test_adapter import raw_chunk,snapshot
+    class Robot:
+        run_id=73
+        def status(self):return {'enabled':True}
+        def acquire_control(self):pass
+        def observe(self,**kwargs):
+            value=snapshot();value['robot']['state']['state_seq']=123
+            value['robot']['state']['q']=[.01*i for i in range(29)]
+            for frame in value['frames'].values():
+                frame['metadata'].update(sequence=1,source_sequence=1,source_epoch='test',
+                    rgb_time_ns=1,received_ns=1,published_ns=1)
+            return value
+        def close(self):pass
+        def abandon(self):pass
+    class Model:
+        def infer(self,obs):return ModelActionChunk.from_response(raw_chunk(),received_at=time.monotonic(),period_s=1/30)
+        def close(self):pass
+    class BrokenProjection:
+        def __init__(self,*args):pass
+        def targets(self,*args):raise RuntimeError('record this failing IK input')
+    monkeypatch.setattr(runner.RemoteRobotClient,'connect',lambda *a,**k:Robot())
+    monkeypatch.setattr(runner.ModelClient,'connect',lambda *a,**k:Model())
+    monkeypatch.setattr(runner,'G1Kinematics',lambda:None)
+    monkeypatch.setattr(runner,'build_observation',lambda *a,**k:{})
+    monkeypatch.setattr(projection,'ArmGripperProjection',BrokenProjection)
+    config=dict(robot_target='robot:1',model_server_url='ws://model:2',instruction='test',period_s=1/30,
+        horizon=30,model_timeout_s=1,rpc_timeout_s=1,gripper_mapping={},
+        projection={'gripper_endpoints':{'left':[0,5.4],'right':[0,5.4]}})
+    with pytest.raises(RuntimeError,match='failing IK input'):
+        runner.run(config,seconds=1,output=tmp_path/'trace')
+    report=json.loads((tmp_path/'trace/result.json').read_text())
+    actual=report['goals'][0]['ik_input']
+    assert actual['q']==[.01*i for i in range(29)]
+    assert actual['state_seq']==123
+    assert actual['tool_targets']=={'left':[0.]*6,'right':[0.]*6}
+    assert report['goal_trace_capacity']==4096
+    assert report['accepted_goals_not_retained']==0
+
+
 def test_independent_endpoints_and_explicit_input_profile(tmp_path):
     p=tmp_path/'adapter.yaml'
     p.write_text('''robot_target: 192.168.1.10:15051

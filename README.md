@@ -4,6 +4,8 @@ WLA에서 기존 UniFoLM W8A8 모델과 Adapter를 실행하고, G1 Orin NX의 P
 
 0.3.5부터 다음 실제 관측은 기본적으로 현재 chunk의 2/3가 재생된 뒤 요청합니다. `request_after_fraction: 1.0` 또는 `--request-after-fraction 1`은 chunk 종료 후 요청합니다. 첫 관측은 즉시 요청합니다. 이는 재생 시간 기준이며 실제 관절 도착 판정은 아닙니다.
 
+관절 목표 기록은 최대 4096개이며, 각 팔 projection 전에 사용한 `ik_input.q`(29개 측정각), `state_seq`, 양손 `tool_targets`를 함께 남깁니다. IK가 실패해도 해당 입력은 저장합니다. `accepted_goals_not_retained`가 0보다 크면 앞부분 기록이 유실된 것입니다. 기록 직렬화는 제어권 정리 뒤 수행하며 이 진단은 IK 해나 명령을 변경하지 않습니다.
+
 | 실행 위치 | 구성 |
 |---|---|
 | WLA `/home/wla/paos-model-adapter` | 모델 서버·Adapter |
